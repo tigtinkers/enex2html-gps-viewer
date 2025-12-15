@@ -4,6 +4,8 @@ import hashlib
 import os
 import xml.etree.ElementTree as ET
 import re
+from datetime import datetime
+from html import unescape
 
 def extract_notes_from_enex(enex_file):
     """Extracts notes from an Evernote ENEX file and returns them as a list of dictionaries."""
@@ -76,7 +78,7 @@ def extract_notes_from_enex(enex_file):
     return notes
 
 
-def extract_resources(note, resources_dir):
+def extract_resources(note, resources_dir, web_prefix="resources/"):
     os.makedirs(resources_dir, exist_ok=True)
     hash_map = {}
 
@@ -121,7 +123,7 @@ def extract_resources(note, resources_dir):
 
         hash_map[hash_hex] = {
             "mime": mime,
-            "output_path": f"resources/{output_name}",
+            "output_path": f"{web_prefix}{output_name}",
         }
 
     return hash_map
@@ -167,6 +169,31 @@ def normalize_enml_to_html(enml):
     return cleaned.strip()
 
 
+def parse_evernote_timestamp(ts):
+    if not ts:
+        return None
+    try:
+        dt = datetime.strptime(ts, "%Y%m%dT%H%M%SZ")
+        return dt.isoformat() + "Z"
+    except Exception:
+        return None
+
+
+def generate_snippet_from_html(html_content, max_length=400):
+    if not html_content:
+        return ""
+
+    text = re.sub(r"<[^>]+>", " ", html_content)
+    text = re.sub(r"https?://\S+", " ", text)
+    text = unescape(text)
+    text = re.sub(r"\s+", " ", text).strip()
+
+    if len(text) <= max_length:
+        return text
+
+    return text[: max_length - 1].rstrip() + "…"
+
+
 def compute_note_id(note):
     title = note.get("title") or ""
     content = note.get("content") or ""
@@ -199,20 +226,162 @@ def build_location_html(note):
     )
 
 def process_enex_files(input_dir, output_dir):
-    toc_file = os.path.join(output_dir, "ToC.html")
-    individual_notes_dir = os.path.join(output_dir, "individual_notes")
+    toc_file = os.path.join(output_dir, "index.html")
+    notes_dir = os.path.join(output_dir, "notes")
     resources_dir = os.path.join(output_dir, "resources")
 
-    # Ensure output directories exist
     os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(individual_notes_dir, exist_ok=True)
-
-    notes_by_file = {}
+    os.makedirs(notes_dir, exist_ok=True)
 
     all_notes_metadata = []
 
+    for filename in sorted(os.listdir(input_dir)):
+        if not filename.endswith(".enex"):
+            continue
+
+        input_filepath = os.path.join(input_dir, filename)
+        notes = extract_notes_from_enex(input_filepath)
+        notes = sorted(
+            notes,
+            key=lambda n: (
+                n.get("created") or "",
+                n.get("title") or "",
+            ),
+        )
+
+        for note in notes:
+            title = note.get("title") or "Untitled"
+            note_id = compute_note_id(note)
+            normalized_content = normalize_enml_to_html(note.get("content"))
+            snippet = generate_snippet_from_html(normalized_content)
+            hash_map = extract_resources(note, resources_dir, web_prefix="../resources/")
+            rendered_content = rewrite_en_media(normalized_content, hash_map)
+            location_html = build_location_html(note)
+
+            note_filename = f"{note_id}.html"
+            note_filepath = os.path.join(notes_dir, note_filename)
+
+            with open(note_filepath, "w", encoding="utf-8") as individual_out:
+                individual_out.write(
+                    f"""
+                    <html>
+                    <head>
+                        <meta charset=\"UTF-8\">
+                        <title>{title}</title>
+                        <style>
+                            body {{
+                                font-family: 'Open Sans', sans-serif;
+                                max-width: 800px;
+                                margin: 20px auto;
+                                background: #f9f9f9;
+                                padding: 20px;
+                                color: #333;
+                            }}
+                            h1 {{
+                                font-family: 'Roboto', sans-serif;
+                                color: #444;
+                                text-align: center;
+                                font-weight: 500;
+                                border-bottom: 3px solid #4CAF50;
+                                padding-bottom: 15px;
+                                margin-bottom: 30px;
+                            }}
+                            .note {{
+                                background: #fff;
+                                padding: 20px;
+                                border-radius: 8px;
+                                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+                                margin: 0 0 24px 0;
+                                display: flow-root;
+                                width: 100%;
+                                box-sizing: border-box;
+                                overflow: auto;
+                                float: none;
+                            }}
+                            .note-title {{
+                                font-size: 24px;
+                                font-weight: 500;
+                                color: #4CAF50;
+                                margin-bottom: 10px;
+                            }}
+                            .note-meta {{
+                                font-size: 14px;
+                                color: #666;
+                                margin-bottom: 8px;
+                            }}
+                            .note-location {{
+                                font-size: 14px;
+                                color: #555;
+                                margin-bottom: 10px;
+                            }}
+                            .note-content {{
+                                line-height: 1.8;
+                                color: #555;
+                                font-size: 16px;
+                            }}
+                            .note-content img, .note-content video {{
+                                max-width: 100%;
+                                height: auto;
+                            }}
+                            .note-content iframe {{
+                                max-width: 100%;
+                            }}
+                            .note-content [style*="position:fixed"], .note-content [style*="position: fixed"] {{
+                                position: static !important;
+                            }}
+                            .note-content [style*="position:sticky"], .note-content [style*="position: sticky"] {{
+                                position: static !important;
+                            }}
+                            .note-content [style*="float:right"], .note-content [style*="float: right"] {{
+                                float: none !important;
+                            }}
+                            .note-content [style*="float:left"], .note-content [style*="float: left"] {{
+                                float: none !important;
+                            }}
+                        </style>
+                    </head>
+                    <body>
+                        <h1>{title}</h1>
+                        <div class=\"note\" id=\"note-{note_id}\"> 
+                            <div class=\"note-title\">{title}</div>
+                            <div class=\"note-meta\">Created: {note.get('created') or 'N/A'} | Updated: {note.get('updated') or 'N/A'}</div>
+                            {location_html}
+                            <div class=\"note-content\">{rendered_content}</div>
+                        </div>
+                    </body>
+                    </html>
+                    """
+                )
+
+            all_notes_metadata.append(
+                {
+                    "id": note_id,
+                    "title": title,
+                    "created": note.get("created"),
+                    "updated": note.get("updated"),
+                    "createdIso": parse_evernote_timestamp(note.get("created")),
+                    "updatedIso": parse_evernote_timestamp(note.get("updated")),
+                    "lat": note.get("latitude"),
+                    "lon": note.get("longitude"),
+                    "alt": note.get("altitude"),
+                    "hasLocation": note.get("latitude") is not None and note.get("longitude") is not None,
+                    "htmlPath": f"notes/{note_filename}",
+                    "sourceEnex": filename,
+                    "snippet": snippet,
+                }
+            )
+
+    all_notes_metadata = sorted(
+        all_notes_metadata,
+        key=lambda n: (
+            n.get("created") or "",
+            n.get("title") or "",
+        ),
+    )
+
     with open(toc_file, "w", encoding="utf-8") as out:
-        out.write("""
+        out.write(
+            """
         <html>
         <head>
             <meta charset="UTF-8">
@@ -255,14 +424,6 @@ def process_enex_files(input_dir, output_dir):
                     color: #0056b3;
                     text-decoration: underline;
                 }
-                .toc-notes {
-                    list-style-type: none;
-                    padding-left: 20px;
-                    margin-top: 8px;
-                }
-                .toc-notes li {
-                    margin-bottom: 6px;
-                }
                 .toc-meta {
                     color: #666;
                     font-size: 14px;
@@ -272,72 +433,6 @@ def process_enex_files(input_dir, output_dir):
                     font-size: 14px;
                     margin-left: 8px;
                 }
-                .note {
-                    background: #fff;
-                    padding: 20px;
-                    border-radius: 8px;
-                    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-                    margin: 0 0 24px 0;
-                    display: flow-root;
-                    width: 100%;
-                    box-sizing: border-box;
-                    overflow: auto;
-                    transition: all 0.3s ease;
-                    float: none;
-                }
-                .note:hover {
-                    transform: scale(1.02);
-                    box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
-                }
-                .note-title {
-                    font-size: 24px;
-                    font-weight: 500;
-                    color: #4CAF50;
-                    margin-bottom: 10px;
-                }
-                .note-location {
-                    font-size: 14px;
-                    color: #555;
-                    margin-bottom: 10px;
-                }
-                .note-content {
-                    line-height: 1.8;
-                    color: #555;
-                    font-size: 16px;
-                    box-sizing: border-box;
-                }
-                .note-content img {
-                    max-width: 100%;
-                    height: auto;
-                }
-                .note-content * {
-                    max-width: 100%;
-                }
-                .note-content img, .note-content video {
-                    max-width: 100%;
-                    height: auto;
-                }
-                .note-content iframe {
-                    max-width: 100%;
-                }
-                .note-content [style*="position:fixed"], .note-content [style*="position: fixed"] {
-                    position: static !important;
-                }
-                .note-content [style*="position:sticky"], .note-content [style*="position: sticky"] {
-                    position: static !important;
-                }
-                .note-content [style*="float:right"], .note-content [style*="float: right"] {
-                    float: none !important;
-                }
-                .note-content [style*="float:left"], .note-content [style*="float: left"] {
-                    float: none !important;
-                }
-                .note-footer {
-                    text-align: center;
-                    font-size: 14px;
-                    color: #777;
-                    margin-top: 20px;
-                }
             </style>
         </head>
         <body>
@@ -346,190 +441,46 @@ def process_enex_files(input_dir, output_dir):
             <ul class="toc">
         """)
 
-        for filename in os.listdir(input_dir):
-            if filename.endswith(".enex"):
-                input_filepath = os.path.join(input_dir, filename)
-                notes = extract_notes_from_enex(input_filepath)
-                notes = sorted(
-                    notes,
-                    key=lambda n: (
-                        n.get("created") or "",
-                        n.get("title") or "",
-                    ),
-                )
-                notes_by_file[filename] = []
+        for entry in all_notes_metadata:
+            metadata_parts = []
+            if entry.get("created"):
+                metadata_parts.append(f"Created: {entry.get('created')}")
+            if entry.get("updated"):
+                metadata_parts.append(f"Updated: {entry.get('updated')}")
 
-                individual_html_file = os.path.join(individual_notes_dir, f"{filename.replace('.enex', '.html')}")
-                with open(individual_html_file, "w", encoding="utf-8") as individual_out:
-                    individual_out.write(f"""
-                    <html>
-                    <head>
-                        <meta charset="UTF-8">
-                        <title>{filename}</title>
-                        <style>
-                            body {{
-                                font-family: 'Open Sans', sans-serif;
-                                max-width: 800px;
-                                margin: 20px auto;
-                                background: #f9f9f9;
-                                padding: 20px;
-                                color: #333;
-                            }}
-                            h1 {{
-                                font-family: 'Roboto', sans-serif;
-                                color: #444;
-                                text-align: center;
-                                font-weight: 500;
-                                border-bottom: 3px solid #4CAF50;
-                                padding-bottom: 15px;
-                                margin-bottom: 30px;
-                            }}
-                            .note {{
-                                background: #fff;
-                                padding: 20px;
-                                border-radius: 8px;
-                                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-                                margin: 0 0 24px 0;
-                                display: flow-root;
-                                width: 100%;
-                                box-sizing: border-box;
-                                overflow: auto;
-                                float: none;
-                            }}
-                            .note-title {{
-                                font-size: 24px;
-                                font-weight: 500;
-                                color: #4CAF50;
-                                margin-bottom: 10px;
-                            }}
-                            .note-location {{
-                                font-size: 14px;
-                                color: #555;
-                                margin-bottom: 10px;
-                            }}
-                            .note-content {{
-                                line-height: 1.8;
-                                color: #555;
-                                font-size: 16px;
-                            }}
-                            .note-content img, .note-content video {{
-                                max-width: 100%;
-                                height: auto;
-                            }}
-                            .note-content iframe {{
-                                max-width: 100%;
-                            }}
-                            .note-content [style*="position:fixed"], .note-content [style*="position: fixed"] {{
-                                position: static !important;
-                            }}
-                            .note-content [style*="position:sticky"], .note-content [style*="position: sticky"] {{
-                                position: static !important;
-                            }}
-                            .note-content [style*="float:right"], .note-content [style*="float: right"] {{
-                                float: none !important;
-                            }}
-                            .note-content [style*="float:left"], .note-content [style*="float: left"] {{
-                                float: none !important;
-                            }}
-                          </style>
-                    </head>
-                    <body>
-                        <h1>{filename}</h1>
-                    """)
+            metadata_text = (
+                f" <span class=\"toc-meta\">{' | '.join(metadata_parts)}</span>"
+                if metadata_parts
+                else ""
+            )
 
-                    for note in notes:
-                        title = note.get("title")
-                        hash_map = extract_resources(note, resources_dir)
-                        normalized_content = normalize_enml_to_html(note.get("content"))
-                        rendered_content = rewrite_en_media(normalized_content, hash_map)
-                        note_id = compute_note_id(note)
-                        location_html = build_location_html(note)
-                        note_with_rendered = dict(note)
-                        note_with_rendered["rendered_content"] = rendered_content
-                        note_with_rendered["note_id"] = note_id
-                        note_with_rendered["location_html"] = location_html
-                        notes_by_file[filename].append(note_with_rendered)
-                        all_notes_metadata.append(
-                            {
-                                "id": note_id,
-                                "title": title,
-                                "created": note.get("created"),
-                                "updated": note.get("updated"),
-                                "lat": note.get("latitude"),
-                                "lon": note.get("longitude"),
-                                "alt": note.get("altitude"),
-                                "htmlPath": f"individual_notes/{filename.replace('.enex', '.html')}#note-{note_id}",
-                                "sourceEnex": filename,
-                            }
-                        )
-                        individual_out.write(f"""
-                        <div class="note" id="note-{note_id}">
-                            <div class="note-title">{title}</div>
-                            {location_html}
-                            <div class="note-content">{rendered_content}</div>
-                        </div>
-                        """)
-
-                    individual_out.write("</body></html>")
-
-                out.write(
-                    f'<li><strong>{filename}</strong><ul class="toc-notes">'  # start nested list
+            location_snippet = ""
+            if entry.get("lat") is not None and entry.get("lon") is not None:
+                lat = entry.get("lat")
+                lon = entry.get("lon")
+                google_maps = f"https://www.google.com/maps?q={lat},{lon}"
+                osm_maps = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=18/{lat}/{lon}"
+                location_snippet = (
+                    f' <span class="toc-location">📍 '
+                    f'<a href="{google_maps}">Google</a> | '
+                    f'<a href="{osm_maps}">OSM</a></span>'
                 )
 
-                for note in notes_by_file[filename]:
-                    title = note.get("title") or "Untitled"
-                    note_id = note.get("note_id") or compute_note_id(note)
-                    created = note.get("created")
-                    updated = note.get("updated")
-                    lat = note.get("latitude")
-                    lon = note.get("longitude")
-
-                    metadata_parts = []
-                    if created:
-                        metadata_parts.append(f"Created: {created}")
-                    if updated:
-                        metadata_parts.append(f"Updated: {updated}")
-
-                    location_snippet = ""
-                    if lat is not None and lon is not None:
-                        google_maps = f"https://www.google.com/maps?q={lat},{lon}"
-                        osm_maps = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=18/{lat}/{lon}"
-                        location_snippet = (
-                            f' <span class="toc-location">📍 '
-                            f'<a href="{google_maps}">Google</a> | '
-                            f'<a href="{osm_maps}">OSM</a></span>'
-                        )
-
-                    metadata_text = (
-                        f" <span class=\"toc-meta\">{' | '.join(metadata_parts)}</span>"
-                        if metadata_parts
-                        else ""
-                    )
-
-                    note_link = f"individual_notes/{filename.replace('.enex', '.html')}#note-{note_id}"
-                    out.write(
-                        f'<li><a href="{note_link}">{title}</a>{metadata_text}{location_snippet}</li>'
-                    )
-
-                out.write("</ul></li>\n")
+            out.write(
+                f'<li><a href="{entry.get("htmlPath")}">{entry.get("title")}</a>{metadata_text}{location_snippet}</li>'
+            )
 
         out.write("</ul>")
 
-        out.write("""
+        out.write(
+            """
             <div class="note-footer">
                 <p>Generated by Python Script | Evernote Notes</p>
             </div>
         </body>
         </html>
-        """)
-
-    all_notes_metadata = sorted(
-        all_notes_metadata,
-        key=lambda n: (
-            n.get("created") or "",
-            n.get("title") or "",
-        ),
-    )
+        """
+        )
 
     notes_json_path = os.path.join(output_dir, "notes.json")
     with open(notes_json_path, "w", encoding="utf-8") as notes_json:
@@ -539,7 +490,7 @@ def process_enex_files(input_dir, output_dir):
 
     print(f"✅ All ENEX files have been processed and saved to: {output_dir}")
     print(f"✅ Table of Contents saved as: {toc_file}")
-    print(f"✅ Individual notes saved in: {individual_notes_dir}")
+    print(f"✅ Individual notes saved in: {notes_dir}")
     print(f"✅ Notes index saved as: {notes_json_path}")
 
 if __name__ == "__main__":

@@ -25,26 +25,29 @@ python3 convert_enex_to_html.py --input-dir "/path/to/enex/files" --output-dir "
 ## 📂 Output Structure
 ```
 output-dir/
-│── ToC.html          # Merged file with Table of Contents + all notes
-│── individual_notes/  # Folder containing separate HTML files per .enex
-│   ├── note1.html
-│   ├── note2.html
+│── index.html         # Table of Contents linking to individual notes
+│── notes/             # One HTML page per note (isolated layout)
+│   ├── <note_id>.html
 │   ├── ...
+│── resources/         # Extracted attachments referenced by notes
 │── notes.json         # Machine-readable index of all notes
 ```
 
 ## 🗺️ notes.json schema
 Each run writes a `notes.json` file in the output directory to support map-first and search experiences. It is a UTF-8 JSON array with one object per note:
 
-- `id`: Stable note identifier used in HTML anchors (matches `id="note-<id>"`).
+- `id`: Stable note identifier used for filenames (`notes/<id>.html`) and anchors.
 - `title`: Note title.
 - `created`, `updated`: Original Evernote timestamp strings, if present.
+- `createdIso`, `updatedIso`: Parsed ISO-8601 timestamps when available.
 - `lat`, `lon`, `alt`: GPS coordinates (numbers or `null`).
-- `htmlPath`: Relative link to the rendered note HTML (e.g., `individual_notes/example.html#note-<id>`).
+- `hasLocation`: Boolean flag when latitude/longitude are present.
+- `htmlPath`: Relative link to the rendered note HTML (e.g., `notes/<id>.html`).
 - `sourceEnex`: Source `.enex` filename (basename).
+- `snippet`: Plain-text summary (first few hundred characters) for search.
 
-## 📝 Example  
-After running the script, open `ToC.html` in your browser to view all notes in an organized format.
+## 📝 Example
+After running the script, open `index.html` in your browser to view all notes in an organized format.
 
 ## 📚 License  
 MIT License  
