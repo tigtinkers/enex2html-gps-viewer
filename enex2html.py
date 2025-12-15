@@ -1,9 +1,11 @@
+import argparse
+import base64
+import hashlib
 import os
 import xml.etree.ElementTree as ET
-import argparse
 
 def extract_notes_from_enex(enex_file):
-    """Extracts notes from an Evernote ENEX file and returns them as a list of (title, content) tuples."""
+    """Extracts notes from an Evernote ENEX file and returns them as a list of dictionaries."""
     notes = []
     tree = ET.parse(enex_file)
     root = tree.getroot()
@@ -11,17 +13,188 @@ def extract_notes_from_enex(enex_file):
     for note in root.findall(".//note"):
         title = note.find("title").text if note.find("title") is not None else "Untitled"
         content = note.find("content").text if note.find("content") is not None else "<p>No content</p>"
-        notes.append((title, content))
+        created = note.find("created").text if note.find("created") is not None else None
+        updated = note.find("updated").text if note.find("updated") is not None else None
+
+        note_attributes = note.find("note-attributes")
+        latitude = None
+        longitude = None
+        altitude = None
+        if note_attributes is not None:
+            lat_text = note_attributes.find("latitude").text if note_attributes.find("latitude") is not None else None
+            lon_text = note_attributes.find("longitude").text if note_attributes.find("longitude") is not None else None
+            alt_text = note_attributes.find("altitude").text if note_attributes.find("altitude") is not None else None
+
+            try:
+                latitude = float(lat_text) if lat_text is not None else None
+            except (TypeError, ValueError):
+                latitude = None
+
+            try:
+                longitude = float(lon_text) if lon_text is not None else None
+            except (TypeError, ValueError):
+                longitude = None
+
+            try:
+                altitude = float(alt_text) if alt_text is not None else None
+            except (TypeError, ValueError):
+                altitude = None
+
+        resources = []
+        for resource in note.findall("resource"):
+            data_element = resource.find("data")
+            resource_attributes = resource.find("resource-attributes")
+
+            data_base64 = data_element.text if data_element is not None else None
+            data_hash = data_element.get("hash") if data_element is not None else None
+            mime = resource.find("mime").text if resource.find("mime") is not None else None
+            filename = (
+                resource_attributes.find("file-name").text
+                if resource_attributes is not None and resource_attributes.find("file-name") is not None
+                else None
+            )
+
+            resources.append({
+                "hash": data_hash,
+                "mime": mime,
+                "filename": filename,
+                "data_base64": data_base64,
+            })
+
+        notes.append({
+            "title": title,
+            "content": content,
+            "created": created,
+            "updated": updated,
+            "latitude": latitude,
+            "longitude": longitude,
+            "altitude": altitude,
+            "resources": resources,
+        })
 
     return notes
+
+
+def extract_resources(note, resources_dir):
+    os.makedirs(resources_dir, exist_ok=True)
+    hash_map = {}
+
+    mime_extensions = {
+        "image/jpeg": ".jpg",
+        "image/png": ".png",
+        "image/gif": ".gif",
+        "application/pdf": ".pdf",
+        "audio/mpeg": ".mp3",
+        "audio/mp4": ".m4a",
+        "video/mp4": ".mp4",
+    }
+
+    for resource in note.get("resources", []):
+        data_base64 = resource.get("data_base64")
+        mime = resource.get("mime")
+        filename = resource.get("filename")
+        if not data_base64:
+            continue
+
+        try:
+            data_bytes = base64.b64decode(data_base64)
+        except (ValueError, TypeError):
+            continue
+
+        hash_hex = resource.get("hash")
+        if not hash_hex:
+            hash_hex = hashlib.md5(data_bytes).hexdigest()
+        hash_hex = hash_hex.lower()
+
+        ext = ""
+        if mime:
+            ext = mime_extensions.get(mime, "")
+
+        output_name = os.path.basename(filename) if filename else f"{hash_hex}{ext}"
+        output_path = os.path.join(resources_dir, output_name)
+        try:
+            with open(output_path, "wb") as f:
+                f.write(data_bytes)
+        except OSError:
+            continue
+
+        hash_map[hash_hex] = {
+            "mime": mime,
+            "output_path": f"resources/{output_name}",
+        }
+
+    return hash_map
+
+
+def rewrite_en_media(content, hash_map):
+    if not content or not hash_map:
+        return content
+
+    def replace_tag(match):
+        hash_value = match.group(1).lower()
+        resource_info = hash_map.get(hash_value)
+        if not resource_info:
+            return match.group(0)
+
+        mime = resource_info.get("mime", "") or ""
+        src = resource_info.get("output_path")
+        if mime.startswith("image/"):
+            return f'<img src="{src}">'  # minimal conversion
+        if mime.startswith("audio/"):
+            return f'<audio controls src="{src}"></audio>'
+        if mime.startswith("video/"):
+            return f'<video controls src="{src}"></video>'
+        if mime == "application/pdf":
+            return f'<a href="{src}">PDF</a>'
+        return f'<a href="{src}">Attachment</a>'
+
+    import re
+
+    en_media_pattern = re.compile(r"<en-media[^>]*hash=(?:\"|')([0-9a-fA-F]+)(?:\"|')[^>]*/?>")
+    return en_media_pattern.sub(replace_tag, content)
+
+
+def compute_note_id(note):
+    title = note.get("title") or ""
+    content = note.get("content") or ""
+    created = note.get("created")
+
+    if created:
+        base_string = f"{created}:{title}"
+    else:
+        base_string = f"{title}:{content[:200]}"
+
+    return hashlib.md5(base_string.encode("utf-8")).hexdigest()
+
+
+def build_location_html(note):
+    lat = note.get("latitude")
+    lon = note.get("longitude")
+    alt = note.get("altitude")
+
+    if lat is None or lon is None:
+        return ""
+
+    google_maps = f"https://www.google.com/maps?q={lat},{lon}"
+    osm_maps = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=18/{lat}/{lon}"
+    altitude_text = f" | Alt: {alt:.1f} m" if alt is not None else ""
+
+    return (
+        f'<div class="note-location">Location: {lat:.6f}, {lon:.6f}{altitude_text} '
+        f'(<a href="{google_maps}">Google Maps</a> | '
+        f'<a href="{osm_maps}">OpenStreetMap</a>)</div>'
+    )
 
 def process_enex_files(input_dir, output_dir):
     toc_file = os.path.join(output_dir, "ToC.html")
     individual_notes_dir = os.path.join(output_dir, "individual_notes")
+    resources_dir = os.path.join(output_dir, "resources")
 
     # Ensure output directories exist
     os.makedirs(output_dir, exist_ok=True)
     os.makedirs(individual_notes_dir, exist_ok=True)
+
+    notes_by_file = {}
 
     with open(toc_file, "w", encoding="utf-8") as out:
         out.write("""
@@ -85,6 +258,11 @@ def process_enex_files(input_dir, output_dir):
                     color: #4CAF50;
                     margin-bottom: 10px;
                 }
+                .note-location {
+                    font-size: 14px;
+                    color: #555;
+                    margin-bottom: 10px;
+                }
                 .note-content {
                     line-height: 1.8;
                     color: #555;
@@ -108,6 +286,7 @@ def process_enex_files(input_dir, output_dir):
             if filename.endswith(".enex"):
                 input_filepath = os.path.join(input_dir, filename)
                 notes = extract_notes_from_enex(input_filepath)
+                notes_by_file[filename] = []
 
                 individual_html_file = os.path.join(individual_notes_dir, f"{filename.replace('.enex', '.html')}")
                 with open(individual_html_file, "w", encoding="utf-8") as individual_out:
@@ -140,6 +319,11 @@ def process_enex_files(input_dir, output_dir):
                                 color: #4CAF50;
                                 margin-bottom: 10px;
                             }}
+                            .note-location {{
+                                font-size: 14px;
+                                color: #555;
+                                margin-bottom: 10px;
+                            }}
                             .note-content {{
                                 line-height: 1.8;
                                 color: #555;
@@ -151,34 +335,47 @@ def process_enex_files(input_dir, output_dir):
                         <h1>{filename}</h1>
                     """)
 
-                    for title, content in notes:
+                    for note in notes:
+                        title = note.get("title")
+                        hash_map = extract_resources(note, resources_dir)
+                        rendered_content = rewrite_en_media(note.get("content"), hash_map)
+                        note_id = compute_note_id(note)
+                        location_html = build_location_html(note)
+                        note_with_rendered = dict(note)
+                        note_with_rendered["rendered_content"] = rendered_content
+                        note_with_rendered["note_id"] = note_id
+                        note_with_rendered["location_html"] = location_html
+                        notes_by_file[filename].append(note_with_rendered)
                         individual_out.write(f"""
-                        <div class="note">
+                        <div class="note" id="note-{note_id}">
                             <div class="note-title">{title}</div>
-                            <div class="note-content">{content}</div>
+                            {location_html}
+                            <div class="note-content">{rendered_content}</div>
                         </div>
                         """)
 
                     individual_out.write("</body></html>")
 
                 out.write(f'<li><a href="individual_notes/{filename.replace(".enex", ".html")}">{filename}</a></li>\n')
-
+        out.write("</ul>")
         out.write("<h2>Notes Content</h2>")
-        for filename in os.listdir(input_dir):
-            if filename.endswith(".enex"):
-                input_filepath = os.path.join(input_dir, filename)
-                notes = extract_notes_from_enex(input_filepath)
-
-                for title, content in notes:
-                    out.write(f"""
-                    <div class="note">
-                        <div class="note-title">{title}</div>
-                        <div class="note-content">{content}</div>
-                    </div>
-                    """)
+        for filename, notes in notes_by_file.items():
+            for note in notes:
+                title = note.get("title")
+                content = note.get("rendered_content")
+                note_id = note.get("note_id") or compute_note_id(note)
+                location_html = note.get("location_html")
+                if location_html is None:
+                    location_html = build_location_html(note)
+                out.write(f"""
+                <div class="note" id="note-{note_id}">
+                    <div class="note-title">{title}</div>
+                    {location_html}
+                    <div class="note-content">{content}</div>
+                </div>
+                """)
 
         out.write("""
-            </ul>
             <div class="note-footer">
                 <p>Generated by Python Script | Evernote Notes</p>
             </div>
