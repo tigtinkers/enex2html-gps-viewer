@@ -3,6 +3,7 @@ import base64
 import hashlib
 import os
 import xml.etree.ElementTree as ET
+import re
 
 def extract_notes_from_enex(enex_file):
     """Extracts notes from an Evernote ENEX file and returns them as a list of dictionaries."""
@@ -148,10 +149,22 @@ def rewrite_en_media(content, hash_map):
             return f'<a href="{src}">PDF</a>'
         return f'<a href="{src}">Attachment</a>'
 
-    import re
-
     en_media_pattern = re.compile(r"<en-media[^>]*hash=(?:\"|')([0-9a-fA-F]+)(?:\"|')[^>]*/?>")
     return en_media_pattern.sub(replace_tag, content)
+
+
+def normalize_enml_to_html(enml):
+    if not enml:
+        return ""
+
+    cleaned = re.sub(r"^\s*<\?xml[^>]*\?>", "", enml, flags=re.IGNORECASE)
+    cleaned = re.sub(r"<!DOCTYPE[^>]*>", "", cleaned, flags=re.IGNORECASE)
+
+    match = re.search(r"<en-note[^>]*>(.*)</en-note>", cleaned, flags=re.IGNORECASE | re.DOTALL)
+    if match:
+        return match.group(1).strip()
+
+    return cleaned.strip()
 
 
 def compute_note_id(note):
@@ -347,7 +360,8 @@ def process_enex_files(input_dir, output_dir):
                     for note in notes:
                         title = note.get("title")
                         hash_map = extract_resources(note, resources_dir)
-                        rendered_content = rewrite_en_media(note.get("content"), hash_map)
+                        normalized_content = normalize_enml_to_html(note.get("content"))
+                        rendered_content = rewrite_en_media(normalized_content, hash_map)
                         note_id = compute_note_id(note)
                         location_html = build_location_html(note)
                         note_with_rendered = dict(note)
