@@ -260,7 +260,7 @@ def process_enex_files(input_dir, output_dir):
                     padding: 20px;
                     border-radius: 8px;
                     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-                    margin: 0 0 20px 0;
+                    margin: 0 0 24px 0;
                     display: flow-root;
                     width: 100%;
                     box-sizing: border-box;
@@ -295,6 +295,25 @@ def process_enex_files(input_dir, output_dir):
                 }
                 .note-content * {
                     max-width: 100%;
+                }
+                .note-content img, .note-content video {
+                    max-width: 100%;
+                    height: auto;
+                }
+                .note-content iframe {
+                    max-width: 100%;
+                }
+                .note-content [style*="position:fixed"], .note-content [style*="position: fixed"] {
+                    position: static !important;
+                }
+                .note-content [style*="position:sticky"], .note-content [style*="position: sticky"] {
+                    position: static !important;
+                }
+                .note-content [style*="float:right"], .note-content [style*="float: right"] {
+                    float: none !important;
+                }
+                .note-content [style*="float:left"], .note-content [style*="float: left"] {
+                    float: none !important;
                 }
                 .note-footer {
                     text-align: center;
@@ -348,6 +367,18 @@ def process_enex_files(input_dir, output_dir):
                                 padding-bottom: 15px;
                                 margin-bottom: 30px;
                             }}
+                            .note {{
+                                background: #fff;
+                                padding: 20px;
+                                border-radius: 8px;
+                                box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+                                margin: 0 0 24px 0;
+                                display: flow-root;
+                                width: 100%;
+                                box-sizing: border-box;
+                                overflow: auto;
+                                float: none;
+                            }}
                             .note-title {{
                                 font-size: 24px;
                                 font-weight: 500;
@@ -364,7 +395,26 @@ def process_enex_files(input_dir, output_dir):
                                 color: #555;
                                 font-size: 16px;
                             }}
-                        </style>
+                            .note-content img, .note-content video {{
+                                max-width: 100%;
+                                height: auto;
+                            }}
+                            .note-content iframe {{
+                                max-width: 100%;
+                            }}
+                            .note-content [style*="position:fixed"], .note-content [style*="position: fixed"] {{
+                                position: static !important;
+                            }}
+                            .note-content [style*="position:sticky"], .note-content [style*="position: sticky"] {{
+                                position: static !important;
+                            }}
+                            .note-content [style*="float:right"], .note-content [style*="float: right"] {{
+                                float: none !important;
+                            }}
+                            .note-content [style*="float:left"], .note-content [style*="float: left"] {{
+                                float: none !important;
+                            }}
+                          </style>
                     </head>
                     <body>
                         <h1>{filename}</h1>
