@@ -196,6 +196,8 @@ def process_enex_files(input_dir, output_dir):
 
     notes_by_file = {}
 
+    all_notes_metadata = []
+
     with open(toc_file, "w", encoding="utf-8") as out:
         out.write("""
         <html>
@@ -286,6 +288,13 @@ def process_enex_files(input_dir, output_dir):
             if filename.endswith(".enex"):
                 input_filepath = os.path.join(input_dir, filename)
                 notes = extract_notes_from_enex(input_filepath)
+                notes = sorted(
+                    notes,
+                    key=lambda n: (
+                        n.get("created") or "",
+                        n.get("title") or "",
+                    ),
+                )
                 notes_by_file[filename] = []
 
                 individual_html_file = os.path.join(individual_notes_dir, f"{filename.replace('.enex', '.html')}")
@@ -346,6 +355,19 @@ def process_enex_files(input_dir, output_dir):
                         note_with_rendered["note_id"] = note_id
                         note_with_rendered["location_html"] = location_html
                         notes_by_file[filename].append(note_with_rendered)
+                        all_notes_metadata.append(
+                            {
+                                "id": note_id,
+                                "title": title,
+                                "created": note.get("created"),
+                                "updated": note.get("updated"),
+                                "lat": note.get("latitude"),
+                                "lon": note.get("longitude"),
+                                "alt": note.get("altitude"),
+                                "htmlPath": f"individual_notes/{filename.replace('.enex', '.html')}#note-{note_id}",
+                                "sourceEnex": filename,
+                            }
+                        )
                         individual_out.write(f"""
                         <div class="note" id="note-{note_id}">
                             <div class="note-title">{title}</div>
@@ -383,9 +405,24 @@ def process_enex_files(input_dir, output_dir):
         </html>
         """)
 
+    all_notes_metadata = sorted(
+        all_notes_metadata,
+        key=lambda n: (
+            n.get("created") or "",
+            n.get("title") or "",
+        ),
+    )
+
+    notes_json_path = os.path.join(output_dir, "notes.json")
+    with open(notes_json_path, "w", encoding="utf-8") as notes_json:
+        import json
+
+        json.dump(all_notes_metadata, notes_json, indent=2, ensure_ascii=False)
+
     print(f"✅ All ENEX files have been processed and saved to: {output_dir}")
     print(f"✅ Table of Contents saved as: {toc_file}")
     print(f"✅ Individual notes saved in: {individual_notes_dir}")
+    print(f"✅ Notes index saved as: {notes_json_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert Evernote .enex files to styled HTML.")
