@@ -255,6 +255,23 @@ def process_enex_files(input_dir, output_dir):
                     color: #0056b3;
                     text-decoration: underline;
                 }
+                .toc-notes {
+                    list-style-type: none;
+                    padding-left: 20px;
+                    margin-top: 8px;
+                }
+                .toc-notes li {
+                    margin-bottom: 6px;
+                }
+                .toc-meta {
+                    color: #666;
+                    font-size: 14px;
+                    margin-left: 6px;
+                }
+                .toc-location {
+                    font-size: 14px;
+                    margin-left: 8px;
+                }
                 .note {
                     background: #fff;
                     padding: 20px;
@@ -455,24 +472,48 @@ def process_enex_files(input_dir, output_dir):
 
                     individual_out.write("</body></html>")
 
-                out.write(f'<li><a href="individual_notes/{filename.replace(".enex", ".html")}">{filename}</a></li>\n')
+                out.write(
+                    f'<li><strong>{filename}</strong><ul class="toc-notes">'  # start nested list
+                )
+
+                for note in notes_by_file[filename]:
+                    title = note.get("title") or "Untitled"
+                    note_id = note.get("note_id") or compute_note_id(note)
+                    created = note.get("created")
+                    updated = note.get("updated")
+                    lat = note.get("latitude")
+                    lon = note.get("longitude")
+
+                    metadata_parts = []
+                    if created:
+                        metadata_parts.append(f"Created: {created}")
+                    if updated:
+                        metadata_parts.append(f"Updated: {updated}")
+
+                    location_snippet = ""
+                    if lat is not None and lon is not None:
+                        google_maps = f"https://www.google.com/maps?q={lat},{lon}"
+                        osm_maps = f"https://www.openstreetmap.org/?mlat={lat}&mlon={lon}#map=18/{lat}/{lon}"
+                        location_snippet = (
+                            f' <span class="toc-location">📍 '
+                            f'<a href="{google_maps}">Google</a> | '
+                            f'<a href="{osm_maps}">OSM</a></span>'
+                        )
+
+                    metadata_text = (
+                        f" <span class=\"toc-meta\">{' | '.join(metadata_parts)}</span>"
+                        if metadata_parts
+                        else ""
+                    )
+
+                    note_link = f"individual_notes/{filename.replace('.enex', '.html')}#note-{note_id}"
+                    out.write(
+                        f'<li><a href="{note_link}">{title}</a>{metadata_text}{location_snippet}</li>'
+                    )
+
+                out.write("</ul></li>\n")
+
         out.write("</ul>")
-        out.write("<h2>Notes Content</h2>")
-        for filename, notes in notes_by_file.items():
-            for note in notes:
-                title = note.get("title")
-                content = note.get("rendered_content")
-                note_id = note.get("note_id") or compute_note_id(note)
-                location_html = note.get("location_html")
-                if location_html is None:
-                    location_html = build_location_html(note)
-                out.write(f"""
-                <div class="note" id="note-{note_id}">
-                    <div class="note-title">{title}</div>
-                    {location_html}
-                    <div class="note-content">{content}</div>
-                </div>
-                """)
 
         out.write("""
             <div class="note-footer">
