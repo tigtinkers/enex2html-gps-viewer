@@ -260,8 +260,13 @@ def process_enex_files(input_dir, output_dir):
                     padding: 20px;
                     border-radius: 8px;
                     box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
-                    margin-bottom: 30px;
+                    margin: 0 0 20px 0;
+                    display: flow-root;
+                    width: 100%;
+                    box-sizing: border-box;
+                    overflow: auto;
                     transition: all 0.3s ease;
+                    float: none;
                 }
                 .note:hover {
                     transform: scale(1.02);
@@ -282,6 +287,14 @@ def process_enex_files(input_dir, output_dir):
                     line-height: 1.8;
                     color: #555;
                     font-size: 16px;
+                    box-sizing: border-box;
+                }
+                .note-content img {
+                    max-width: 100%;
+                    height: auto;
+                }
+                .note-content * {
+                    max-width: 100%;
                 }
                 .note-footer {
                     text-align: center;
