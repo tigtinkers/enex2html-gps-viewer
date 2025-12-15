@@ -16,10 +16,10 @@ git clone https://github.com/your-username/enex-to-html.git
 cd enex-to-html
 ```
 
-## 📌 Usage  
-Run the script with your input and output directories:  
+## 📌 Usage
+Run the converter with your input and output directories:
 ```bash
-python3 convert_enex_to_html.py --input-dir "/path/to/enex/files" --output-dir "/path/to/output"
+python3 enex2html.py --input-dir "/path/to/enex/files" --output-dir "/path/to/output"
 ```
 
 ## 📂 Output Structure
@@ -31,6 +31,7 @@ output-dir/
 │   ├── ...
 │── resources/         # Extracted attachments referenced by notes
 │── notes.json         # Machine-readable index of all notes
+│── build_report.txt   # Summary of the latest conversion run
 ```
 
 ## 🗺️ notes.json schema
@@ -45,6 +46,20 @@ Each run writes a `notes.json` file in the output directory to support map-first
 - `htmlPath`: Relative link to the rendered note HTML (e.g., `notes/<id>.html`).
 - `sourceEnex`: Source `.enex` filename (basename).
 - `snippet`: Plain-text summary (first few hundred characters) for search.
+
+## ▶️ How to run locally
+1. Convert your notes
+```bash
+python3 enex2html.py --input-dir /path/to/enex/files --output-dir /tmp/output
+```
+
+2. Serve the output locally for quick inspection (default: port 8000)
+```bash
+python3 serve_local.py --dir /tmp/output --port 8000
+# then open the printed URL, e.g., http://localhost:8000/index.html
+```
+
+Each run also writes a `build_report.txt` in the output directory with counts for ENEX files, notes, geotagged notes, resources, and the key output paths.
 
 ## 📝 Example
 After running the script, open `index.html` in your browser to view all notes in an organized format.

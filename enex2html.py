@@ -234,11 +234,16 @@ def process_enex_files(input_dir, output_dir):
     os.makedirs(notes_dir, exist_ok=True)
 
     all_notes_metadata = []
+    enex_files_processed = 0
+    total_notes = 0
+    notes_with_location = 0
+    total_resources = 0
 
     for filename in sorted(os.listdir(input_dir)):
         if not filename.endswith(".enex"):
             continue
 
+        enex_files_processed += 1
         input_filepath = os.path.join(input_dir, filename)
         notes = extract_notes_from_enex(input_filepath)
         notes = sorted(
@@ -255,6 +260,7 @@ def process_enex_files(input_dir, output_dir):
             normalized_content = normalize_enml_to_html(note.get("content"))
             snippet = generate_snippet_from_html(normalized_content)
             hash_map = extract_resources(note, resources_dir, web_prefix="../resources/")
+            total_resources += len(hash_map)
             rendered_content = rewrite_en_media(normalized_content, hash_map)
             location_html = build_location_html(note)
 
@@ -370,6 +376,10 @@ def process_enex_files(input_dir, output_dir):
                     "snippet": snippet,
                 }
             )
+
+            total_notes += 1
+            if note.get("latitude") is not None and note.get("longitude") is not None:
+                notes_with_location += 1
 
     all_notes_metadata = sorted(
         all_notes_metadata,
@@ -488,10 +498,31 @@ def process_enex_files(input_dir, output_dir):
 
         json.dump(all_notes_metadata, notes_json, indent=2, ensure_ascii=False)
 
-    print(f"✅ All ENEX files have been processed and saved to: {output_dir}")
-    print(f"✅ Table of Contents saved as: {toc_file}")
-    print(f"✅ Individual notes saved in: {notes_dir}")
-    print(f"✅ Notes index saved as: {notes_json_path}")
+    report_lines = [
+        "Build summary:",
+        f"- ENEX files processed: {enex_files_processed}",
+        f"- Notes exported: {total_notes}",
+        f"- Notes with location: {notes_with_location}",
+        f"- Resources exported: {total_resources}",
+        "",
+        "Output paths:",
+        f"- index.html: {toc_file}",
+        f"- notes.json: {notes_json_path}",
+        f"- notes directory: {notes_dir}",
+        f"- resources directory: {resources_dir}",
+    ]
+
+    for line in report_lines:
+        print(line)
+
+    build_report_path = os.path.join(output_dir, "build_report.txt")
+    try:
+        with open(build_report_path, "w", encoding="utf-8") as report_file:
+            report_file.write("\n".join(report_lines))
+    except OSError:
+        print(f"⚠️ Unable to write build report to {build_report_path}")
+
+    print(f"Build report saved to: {build_report_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Convert Evernote .enex files to styled HTML.")
