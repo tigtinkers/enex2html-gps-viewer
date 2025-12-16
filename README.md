@@ -22,13 +22,17 @@ Run the converter with your input and output directories:
 python3 enex2html.py --input-dir "/path/to/enex/files" --output-dir "/path/to/output"
 ```
 
+The input directory is walked recursively, and the relative folder structure is mirrored under `notes/` in the output (e.g., `Personal/Journal.enex` produces `notes/Personal/<note_id>.html`).
+
 ## 📂 Output Structure
 ```
 output-dir/
 │── index.html         # Table of Contents linking to individual notes
-│── notes/             # One HTML page per note (isolated layout)
+│── notes/             # One HTML page per note (isolated layout, mirrors input folders)
 │   ├── <note_id>.html
-│   ├── ...
+│   ├── Personal/
+│   │   └── <note_id>.html
+│   └── ...
 │── resources/         # Extracted attachments referenced by notes
 │── notes.json         # Machine-readable index of all notes
 │── build_report.txt   # Summary of the latest conversion run

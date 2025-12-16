@@ -239,12 +239,22 @@ def process_enex_files(input_dir, output_dir):
     notes_with_location = 0
     total_resources = 0
 
-    for filename in sorted(os.listdir(input_dir)):
-        if not filename.endswith(".enex"):
-            continue
+    enex_file_paths = []
+    for root_dir, dirs, files in os.walk(input_dir):
+        dirs.sort()
+        for filename in sorted(files):
+            if filename.endswith(".enex"):
+                enex_file_paths.append(os.path.join(root_dir, filename))
 
+    enex_file_paths.sort()
+
+    for input_filepath in enex_file_paths:
         enex_files_processed += 1
-        input_filepath = os.path.join(input_dir, filename)
+        rel_enex_path = os.path.relpath(input_filepath, input_dir)
+        rel_dir = os.path.dirname(rel_enex_path)
+        notes_output_dir = os.path.join(notes_dir, rel_dir) if rel_dir not in ("", ".") else notes_dir
+        os.makedirs(notes_output_dir, exist_ok=True)
+
         notes = extract_notes_from_enex(input_filepath)
         notes = sorted(
             notes,
@@ -259,13 +269,19 @@ def process_enex_files(input_dir, output_dir):
             note_id = compute_note_id(note)
             normalized_content = normalize_enml_to_html(note.get("content"))
             snippet = generate_snippet_from_html(normalized_content)
-            hash_map = extract_resources(note, resources_dir, web_prefix="../resources/")
+            web_resources_prefix = os.path.relpath(resources_dir, notes_output_dir).replace(os.sep, "/")
+            if not web_resources_prefix.endswith("/"):
+                web_resources_prefix = f"{web_resources_prefix}/"
+
+            hash_map = extract_resources(note, resources_dir, web_prefix=web_resources_prefix)
             total_resources += len(hash_map)
             rendered_content = rewrite_en_media(normalized_content, hash_map)
             location_html = build_location_html(note)
 
             note_filename = f"{note_id}.html"
-            note_filepath = os.path.join(notes_dir, note_filename)
+            note_filepath = os.path.join(notes_output_dir, note_filename)
+            html_rel_path = os.path.join("notes", rel_dir, note_filename) if rel_dir not in ("", ".") else os.path.join("notes", note_filename)
+            html_rel_path = html_rel_path.replace(os.sep, "/")
 
             with open(note_filepath, "w", encoding="utf-8") as individual_out:
                 individual_out.write(
@@ -371,8 +387,8 @@ def process_enex_files(input_dir, output_dir):
                     "lon": note.get("longitude"),
                     "alt": note.get("altitude"),
                     "hasLocation": note.get("latitude") is not None and note.get("longitude") is not None,
-                    "htmlPath": f"notes/{note_filename}",
-                    "sourceEnex": filename,
+                    "htmlPath": html_rel_path,
+                    "sourceEnex": rel_enex_path,
                     "snippet": snippet,
                 }
             )
