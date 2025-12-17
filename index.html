@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Journal Viewer</title>
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+    integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+
+  <style>
+    :root { --border:#ddd; --muted:#555; --bg:#f6f6f6; --card:#fff; }
+    * { box-sizing: border-box; }
+    body { margin:0; font-family: Arial, sans-serif; background:var(--bg); color:#222; }
+    header { padding:14px 16px; background:var(--card); border-bottom:1px solid var(--border); }
+
+    .wrap { display:grid; grid-template-columns:360px 1fr; height:calc(100vh - 52px); }
+
+    .sidebar { background:var(--card); border-right:1px solid var(--border); display:flex; flex-direction:column; min-height:0; }
+    .controls { padding:12px; border-bottom:1px solid #eee; display:grid; gap:10px; }
+    input, select { padding:8px; border:1px solid #ccc; border-radius:10px; }
+    label { font-size:13px; display:flex; gap:8px; align-items:center; }
+    .list { overflow:auto; padding:8px; min-height:0; }
+
+    .item { padding:10px; border:1px solid #eee; border-radius:12px; margin:8px 0; cursor:pointer; background:var(--card); }
+    .item:hover { border-color:#bbb; }
+    .item.selected { border-color:#666; }
+    .item h3 { margin:0 0 6px; font-size:14px; }
+    .meta { font-size:12px; color:var(--muted); display:flex; gap:8px; flex-wrap:wrap; }
+    .snippet { font-size:12px; color:#333; margin-top:6px; line-height:1.35; }
+
+    .main { display:flex; flex-direction:column; min-height:0; }
+    .detail { padding:10px 12px; background:var(--card); border-bottom:1px solid var(--border); display:flex; justify-content:space-between; gap:10px; align-items:center; }
+    .detail .left { display:grid; gap:4px; }
+    .detail .title { font-weight:700; }
+    .detail .sub { font-size:12px; color:var(--muted); }
+    .detail a { font-size:12px; }
+
+    .tabs { display:flex; gap:8px; padding:8px 12px; background:var(--card); border-bottom:1px solid var(--border); }
+    .tab { padding:8px 10px; border:1px solid #ccc; border-radius:10px; background:#fff; cursor:pointer; font-size:13px; }
+    .tab.active { border-color:#666; }
+
+    .panel { flex:1; min-height:0; display:flex; }
+    iframe { flex:1; width:100%; border:0; background:var(--card); }
+    #map { flex:1; width:100%; height:100%; background:var(--card); }
+
+    .status { padding:10px 12px; font-size:13px; color:#b00020; display:none; }
+
+    @media (max-width:900px){
+      .wrap { grid-template-columns:1fr; }
+      .sidebar { height:45vh; }
+      .main { height:calc(55vh - 52px); }
+    }
+  </style>
+</head>
+
+<body>
+<header><b>Journal Viewer</b></header>
+
+<div class="wrap">
+  <div class="sidebar">
+    <div class="controls">
+      <input id="q" placeholder="Search title + snippet…" />
+      <select id="source">
+        <option value="">All notebooks</option>
+      </select>
+      <label><input type="checkbox" id="loc" /> Only with location</label>
+      <label><input type="checkbox" id="att" /> Has attachments</label>
+      <label><input type="checkbox" id="aud" /> Has audio</label>
+    </div>
+    <div id="list" class="list"></div>
+  </div>
+
+  <div class="main">
+    <div class="detail">
+      <div class="left">
+        <div class="title" id="dt">Select a note</div>
+        <div class="sub" id="ds"></div>
+      </div>
+      <div class="right" style="display:flex;gap:10px;align-items:center;">
+        <a id="gmap" target="_blank" style="display:none;">Google Maps</a>
+        <a id="osm" target="_blank" style="display:none;">OpenStreetMap</a>
+        <a id="open" target="_blank" style="display:none;">Open note</a>
+      </div>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" id="tabList">List</button>
+      <button class="tab" id="tabMap">Map</button>
+    </div>
+
+    <div id="status" class="status"></div>
+
+    <div class="panel" id="panelList">
+      <iframe id="frame"></iframe>
+    </div>
+
+    <div class="panel" id="panelMap" style="display:none;">
+      <div id="map"></div>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+  integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+  crossorigin=""></script>
+
+<script>
+(async function(){
+
+  const $ = id => document.getElementById(id);
+  const listEl = $('list'), qEl=$('q'), sourceEl=$('source'), locEl=$('loc'), attEl=$('att'), audEl=$('aud');
+  const frameEl=$('frame'), dtEl=$('dt'), dsEl=$('ds'), openEl=$('open'), gmapEl=$('gmap'), osmEl=$('osm');
+  const tabList=$('tabList'), tabMap=$('tabMap'), panelList=$('panelList'), panelMap=$('panelMap');
+  const statusEl=$('status');
+
+  let notes=[], selectedId=null, map=null, markersLayer=null, markerById=new Map();
+
+  function esc(s){return String(s??'').replace(/[&<>"']/g,m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[m]));}
+  function hasCoords(n){return typeof n.lat==='number' && typeof n.lon==='number';}
+  function fmtDate(n){return (n.createdIso||n.created||'').slice(0,10);}
+
+  async function loadNotes(){
+    for(const u of ['../notes.json','/notes.json','./notes.json']){
+      try{
+        const r=await fetch(u,{cache:'no-store'});
+        const j=await r.json();
+        if(Array.isArray(j)) return j;
+      }catch{}
+    }
+    throw new Error('notes.json not found');
+  }
+
+  function setTab(which){
+    const isList=which==='list';
+    tabList.classList.toggle('active',isList);
+    tabMap.classList.toggle('active',!isList);
+    panelList.style.display=isList?'flex':'none';
+    panelMap.style.display=isList?'none':'flex';
+    if(!isList){ initMap(); setTimeout(()=>map.invalidateSize(),50); }
+  }
+  tabList.onclick=()=>setTab('list');
+  tabMap.onclick=()=>setTab('map');
+
+  function initMap(){
+    if(map) return;
+    map=L.map('map').setView([20,0],2);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+    markersLayer=L.layerGroup().addTo(map);
+  }
+
+  function rebuildMarkers(filtered){
+    if(!map) return;
+    markersLayer.clearLayers(); markerById.clear();
+    const loc=filtered.filter(hasCoords);
+    if(!loc.length){ map.setView([20,0],2); return; }
+    const bounds=[];
+    for(const n of loc){
+      const m=L.marker([n.lat,n.lon]).addTo(markersLayer);
+      m.bindTooltip(`<div style="font-size:12px"><b>${esc(n.title)}</b><br>${fmtDate(n)}</div>`,
+        {direction:'top',offset:[0,-6],sticky:true});
+      m.on('click',()=>select(n,true));
+      markerById.set(n.id,m);
+      bounds.push([n.lat,n.lon]);
+    }
+    map.fitBounds(bounds,{padding:[30,30]});
+  }
+
+  function select(n,fromMap=false){
+    selectedId=n.id;
+    dtEl.textContent=n.title||'(untitled)';
+    dsEl.textContent=fmtDate(n)+(hasCoords(n)?` • ${n.lat.toFixed(5)}, ${n.lon.toFixed(5)}`:'');
+    if(n.htmlPath){
+      const p='/' + n.htmlPath.replace(/^\/+/,'');
+      frameEl.src=p; openEl.href=p; openEl.style.display='inline';
+    }
+    if(hasCoords(n)){
+      gmapEl.href=`https://www.google.com/maps?q=${n.lat},${n.lon}`;
+      osmEl.href=`https://www.openstreetmap.org/?mlat=${n.lat}&mlon=${n.lon}#map=16/${n.lat}/${n.lon}`;
+      gmapEl.style.display=osmEl.style.display='inline';
+      if(map && !fromMap) map.setView([n.lat,n.lon],Math.max(map.getZoom(),12));
+    }else gmapEl.style.display=osmEl.style.display='none';
+
+    [...listEl.children].forEach(el=>el.classList.toggle('selected',el.dataset.id==n.id));
+  }
+
+  function matches(n,q){
+    if(!q) return 1;
+    q=q.toLowerCase();
+    if((n.title||'').toLowerCase().includes(q)) return 3;
+    if((n.snippet||'').toLowerCase().includes(q)) return 2;
+    return 0;
+  }
+
+  function passes(n){
+    if(sourceEl.value && n.sourceEnex!==sourceEl.value) return false;
+    if(locEl.checked && !hasCoords(n)) return false;
+    if(attEl.checked && !n.hasAttachments) return false;
+    if(audEl.checked && !n.hasAudio) return false;
+    return true;
+  }
+
+  function render(){
+    const q=qEl.value.trim();
+    const items=notes.filter(passes).map(n=>({n,score:matches(n,q)}))
+      .filter(x=>x.score||!q)
+      .sort((a,b)=>b.score-a.score||String(b.n.createdIso||'').localeCompare(a.n.createdIso||''));
+    listEl.innerHTML='';
+    for(const {n} of items){
+      const d=document.createElement('div');
+      d.className='item'+(n.id===selectedId?' selected':'');
+      d.dataset.id=n.id;
+      d.innerHTML=`<h3>${esc(n.title)}</h3>
+        <div class="meta">${fmtDate(n)} ${hasCoords(n)?'📍':''} ${n.hasAudio?'🔊':''} ${n.hasAttachments?'📎':''} ${esc(n.sourceEnex||'')}</div>
+        <div class="snippet">${esc((n.snippet||'').slice(0,240))}</div>`;
+      d.onclick=()=>select(n);
+      listEl.appendChild(d);
+    }
+    if(map) rebuildMarkers(items.map(x=>x.n));
+  }
+
+  try{
+    notes=await loadNotes();
+    [...new Set(notes.map(n=>n.sourceEnex).filter(Boolean))].sort()
+      .forEach(s=>sourceEl.add(new Option(s,s)));
+    [qEl,sourceEl,locEl,attEl,audEl].forEach(el=>el.oninput=render);
+    render();
+  }catch(e){
+    statusEl.style.display='block';
+    statusEl.textContent='Failed to load notes.json';
+  }
+})();
+</script>
+</body>
+</html>
